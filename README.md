@@ -15,11 +15,24 @@ The following describes the setup on a Raspberry Pi 4.
 
 ## OS
 
-Install "Raspberry Pi OS Lite (64-bit)" (Bookworm from 2023-10-10) with the Raspberry Pi Imager v1.8.1.
+Install "Raspberry Pi OS (Legacy) Lite (Bullseye from 2023-05-03) with Raspberry Pi Imager v1.8.1
 
 ## Prerequisites for running the basic benchmark
 
+echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
+
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+
+sudo apt-get update
+
+sudo apt-get install libedgetpu1-max
+(enable maximum operating frequency)
+
+sudo apt-get install python3-tflite-runtime
+
 ## Prerequisites for using PosePipeline
+
+**You will need all prerequisites given for the basic benchmark**
 
 # How to run
 
