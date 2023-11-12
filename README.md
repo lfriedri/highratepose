@@ -32,6 +32,10 @@ sudo apt-get install python3-tflite-runtime
 
 ## Prerequisites for using PosePipeline
 
+sudo apt-get install python3-opencv
+sudo apt-get install python3-psutil
+
+
 **You will need all prerequisites given for the basic benchmark**
 
 # How to run

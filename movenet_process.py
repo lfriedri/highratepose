@@ -2,13 +2,58 @@ import numpy as np
 import tflite_runtime.interpreter as tflite
 from multiprocessing import Process, Event, Array
 import ctypes
+import psutil
+from cv2 import resize, INTER_NEAREST
+
+
+# 17 keypoints
+# each row, column, confidence
+KEYPOINT_SHAPE = [17, 3]
 
 
 def _movenetTask(initFinished: Event, newData: Event, calculationFinished: Event,
                  sharedFrame: Array, sharedKeypoints: Array,
                  deviceId: int, modelPath: str):
+    print(f'Starting _movenetTask with {modelPath} on deviceId {deviceId}')
+    
+    osProcess = psutil.Process()
+    osProcess.cpu_affinity([2, 3])
+    
+    delegate = tflite.load_delegate('libedgetpu.so.1', {'device' : f'usb:{deviceId}'})
+    # delegate = tflite.load_delegate('libedgetpu.so.1', {'device' : 'usb:0'})
+
+    interpreter = tflite.Interpreter(model_path=modelPath,
+                                     experimental_delegates=[delegate])
+    
+    interpreter.allocate_tensors()
+    
+    inputInfo = interpreter.get_input_details()
+    frameShape = inputInfo[0]['shape'][1:]
+    inputIndex = inputInfo[0]['index']
+    
+    outputInfo = interpreter.get_output_details()
+    outputIndex = outputInfo[0]['index']
+    
+    frame = np.frombuffer(sharedFrame.get_obj(),
+                          dtype=np.uint8).reshape(frameShape)
+    keypoints = np.frombuffer(sharedKeypoints.get_obj(),
+                              dtype=np.dtype('float32')).reshape(KEYPOINT_SHAPE)
+    
+    print('Initialization finished')
     initFinished.set()
 
+    while True:
+        newData.wait()
+        newData.clear()
+        
+        interpreter.tensor(inputIndex)()[0] = frame
+        interpreter.invoke()
+        
+        result = interpreter.tensor(outputIndex)()
+        keypoints[:] = result.reshape(KEYPOINT_SHAPE)
+        del result
+        
+        calculationFinished.set()
 
 class MovenetProcess:
     def __init__(self, modelPath: str, deviceId: int):
@@ -26,14 +71,13 @@ class MovenetProcess:
         
         self._sharedFrame = Array(ctypes.c_uint8, int(np.prod(self._frameShape)))
         
-        keypointShape = [17, 3] # row, column, confidence -> 3
-        self._sharedKeypoints = Array(ctypes.c_float, int(np.prod(keypointShape)))
+        self._sharedKeypoints = Array(ctypes.c_float, int(np.prod(KEYPOINT_SHAPE)))
 
         
         self._frame = np.frombuffer(self._sharedFrame.get_obj(),
                                     dtype=np.uint8).reshape(self._frameShape)
         self._keypoints = np.frombuffer(self._sharedKeypoints.get_obj(),
-                                        dtype=np.dtype('float32')).reshape(keypointShape)
+                                        dtype=np.dtype('float32')).reshape(KEYPOINT_SHAPE)
 
         self._process = Process(target=_movenetTask,
                                 args=(self._initFinished,
@@ -41,22 +85,43 @@ class MovenetProcess:
                                       self._calculationFinished,
                                       self._sharedFrame,
                                       self._sharedKeypoints,
-                                      modelPath,
-                                      deviceId))
+                                      deviceId,
+                                      modelPath))
         
         self._process.start()
 
         self._initFinished.wait()
     
     def findPose(self, frame: np.array) -> None:
-        pass
+        resize(frame, tuple(self._frameShape[:2]), self._frame, interpolation=INTER_NEAREST)
+
+        self._newData.set()
     
     def getPose(self) -> np.array:
-        pass
+        self._calculationFinished.wait()
+        self._calculationFinished.clear()
+
+        return self._keypoints
     
     def terminate(self) -> None:
-        pass
+        self._process.terminate()
 
 
 if __name__ == '__main__':
+    from time import monotonic
+    
+    
     mp = MovenetProcess('/home/pi/models/movenet_single_pose_lightning_ptq_edgetpu.tflite', 0)
+    input = (np.random.rand(*[300, 300, 3]) * 255).astype(np.uint8)
+    
+    for i in range(10):
+        mp.findPose(input)
+        mp.getPose()
+        
+    n = 100
+    start = monotonic()
+    for i in range(n):
+        mp.findPose(input)
+        mp.getPose()
+    print((monotonic() - start) / n)
+    mp.terminate()
