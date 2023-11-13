@@ -1,9 +1,20 @@
 import numpy as np
 import tflite_runtime.interpreter as tflite
-from multiprocessing import Process, Event, Array
+from multiprocessing import Process, Event, Array, set_start_method
 import ctypes
 import psutil
 from cv2 import resize, INTER_NEAREST
+import subprocess
+
+
+print('Loading delegates from separate process for initialization')
+
+code = """import tflite_runtime.interpreter as tflite
+for deviceId in [0, 1]:
+    tflite.load_delegate('libedgetpu.so.1', {'device' : f'usb:{deviceId}'})"""
+
+subprocess.run(['python', '-c', code])
+subprocess.run(['python', '-c', code])
 
 
 # 17 keypoints
@@ -20,8 +31,7 @@ def _movenetTask(initFinished: Event, newData: Event, calculationFinished: Event
     osProcess.cpu_affinity([2, 3])
     
     delegate = tflite.load_delegate('libedgetpu.so.1', {'device' : f'usb:{deviceId}'})
-    # delegate = tflite.load_delegate('libedgetpu.so.1', {'device' : 'usb:0'})
-
+    
     interpreter = tflite.Interpreter(model_path=modelPath,
                                      experimental_delegates=[delegate])
     
@@ -54,6 +64,7 @@ def _movenetTask(initFinished: Event, newData: Event, calculationFinished: Event
         del result
         
         calculationFinished.set()
+
 
 class MovenetProcess:
     def __init__(self, modelPath: str, deviceId: int):
@@ -109,19 +120,27 @@ class MovenetProcess:
 
 if __name__ == '__main__':
     from time import monotonic
+   
     
+    modelPath = '/home/pi/models/movenet_single_pose_lightning_ptq_edgetpu.tflite'
+    mps = [MovenetProcess(modelPath, i) for i in [0, 1]]        
     
-    mp = MovenetProcess('/home/pi/models/movenet_single_pose_lightning_ptq_edgetpu.tflite', 0)
-    input = (np.random.rand(*[300, 300, 3]) * 255).astype(np.uint8)
+    input = (np.random.rand(*[240, 240, 3]) * 255).astype(np.uint8)
     
     for i in range(10):
-        mp.findPose(input)
-        mp.getPose()
+        for mp in mps:
+            mp.findPose(input)
+        for mp in mps:
+            mp.getPose()
         
-    n = 100
+    n = 500
     start = monotonic()
     for i in range(n):
-        mp.findPose(input)
-        mp.getPose()
-    print((monotonic() - start) / n)
-    mp.terminate()
+        for mp in mps:
+            mp.findPose(input)
+        for mp in mps:
+            mp.getPose()
+    print((monotonic() - start) / (2 * n))
+    
+    for mp in mps:
+        mp.terminate()
