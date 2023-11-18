@@ -1,7 +1,4 @@
-print('imports')
-
 import argparse
-import os
 import numpy as np
 from time import monotonic
 import tflite_runtime.interpreter as tflite
@@ -9,7 +6,7 @@ import tflite_runtime.interpreter as tflite
 
 parser = argparse.ArgumentParser('benchmark_main.py',
                                  description='Profiles movenet inference on Google Coral USB accelerator.')
-parser.add_argument('model_path', nargs='?', default='/home/pi/models/movenet_single_pose_lightning_ptq_edgetpu.tflite')
+parser.add_argument('model_path', help='provide complete path to a ...edgetpu.tflite model file')
 
 args = parser.parse_args()
 

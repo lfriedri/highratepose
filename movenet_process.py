@@ -5,6 +5,8 @@ import ctypes
 import psutil
 from cv2 import resize, INTER_NEAREST
 import subprocess
+import signal
+import os
 
 
 print('Loading delegates from separate process for initialization')
@@ -17,18 +19,55 @@ subprocess.run(['python', '-c', code])
 subprocess.run(['python', '-c', code])
 
 
-# 17 keypoints
-# each row, column, confidence
-KEYPOINT_SHAPE = [17, 3]
+class KEYPOINT_CODES:
+    NOSE = 0
+    LEFT_EYE = 1
+    RIGHT_EYE = 2
+    LEFT_EAR = 3
+    RIGHT_EAR = 4
+    LEFT_SHOULDER = 5
+    RIGHT_SHOULDER = 6
+    LEFT_ELBOW = 7
+    RIGHT_ELBOW = 8
+    LEFT_WRIST = 9
+    RIGHT_WRIST = 10
+    LEFT_HIP = 11
+    RIGHT_HIP = 12
+    LEFT_KNEE = 13
+    RIGHT_KNEE = 14
+    LEFT_ANKLE = 15
+    RIGHT_ANKLE = 16
+
+NUMBER_OF_KEYPOINTS = 17
+
+# row, column, confidence for each keypoint:
+KEYPOINT_SHAPE = [NUMBER_OF_KEYPOINTS, 3]
 
 
 def _movenetTask(initFinished: Event, newData: Event, calculationFinished: Event,
                  sharedFrame: Array, sharedKeypoints: Array,
-                 deviceId: int, modelPath: str):
+                 deviceId: int, modelPath: str) -> None:
+    """Worker method to be run in other process.
+    
+    Args:
+      initFinished: Is set by _movenetTask when first inference can be started.
+      newData: Should be set from outside to signal new input data
+      calculationFinished: Is set by _movenetTask after each finished inference
+      sharedFrame: shared memory for input data
+      sharedKeypoints: shared memory for output data
+      deviceId: Google Coral USB accelerator id
+      modelPath: ...edgetpu.tflite model file path
+    """
     print(f'Starting _movenetTask with {modelPath} on deviceId {deviceId}')
     
+    # ignore keyboard interrupts, they are handled by the main application
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    
+    pid = os.getpid()
+    os.system(f'sudo chrt -r --pid 50 {pid}')
+    
     osProcess = psutil.Process()
-    osProcess.cpu_affinity([2, 3])
+    osProcess.cpu_affinity([2 + deviceId])
     
     delegate = tflite.load_delegate('libedgetpu.so.1', {'device' : f'usb:{deviceId}'})
     
@@ -67,7 +106,19 @@ def _movenetTask(initFinished: Event, newData: Event, calculationFinished: Event
 
 
 class MovenetProcess:
-    def __init__(self, modelPath: str, deviceId: int):
+    """Run Movenet inference on Google Coral in separate process.
+    
+    This class sets up a new process and allows to send input data (frames) to it,
+    trigger movenet inference and retrieve the output data (keypoints).
+    Inference is done using the Google Coral USB accelerator.
+    """
+    def __init__(self, modelPath: str, deviceId: int) -> None:
+        """Constructor.
+        
+        Args:
+          modelPath: ...edgetpu.tflite model file path
+          deviceId: Google Coral USB accelerator id
+        """
         print(f'Creating MovenetProcess from {modelPath} on deviceId {deviceId}')
         
         # create temporary interpreter, only to find input shape:
@@ -104,43 +155,27 @@ class MovenetProcess:
         self._initFinished.wait()
     
     def findPose(self, frame: np.array) -> None:
+        """Trigger inference with given input data.
+        
+        Args:
+          frame: shape: (nx * ny * 3), uint8
+            Image will be reshaped to match the input size of the given model.
+        """
         resize(frame, tuple(self._frameShape[:2]), self._frame, interpolation=INTER_NEAREST)
 
         self._newData.set()
     
     def getPose(self) -> np.array:
+        """Wait for inference and retrieve output data.
+        
+        Returns
+          nKeypoints * 3 (row, column, confidence)
+        """
         self._calculationFinished.wait()
         self._calculationFinished.clear()
 
         return self._keypoints
     
     def terminate(self) -> None:
+        """Terminate the other process for safe shutdown."""
         self._process.terminate()
-
-
-if __name__ == '__main__':
-    from time import monotonic
-   
-    
-    modelPath = '/home/pi/models/movenet_single_pose_lightning_ptq_edgetpu.tflite'
-    mps = [MovenetProcess(modelPath, i) for i in [0, 1]]        
-    
-    input = (np.random.rand(*[240, 240, 3]) * 255).astype(np.uint8)
-    
-    for i in range(10):
-        for mp in mps:
-            mp.findPose(input)
-        for mp in mps:
-            mp.getPose()
-        
-    n = 500
-    start = monotonic()
-    for i in range(n):
-        for mp in mps:
-            mp.findPose(input)
-        for mp in mps:
-            mp.getPose()
-    print((monotonic() - start) / (2 * n))
-    
-    for mp in mps:
-        mp.terminate()
