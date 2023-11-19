@@ -9,7 +9,7 @@ This repository contains code to run the [Google movenet human pose estimation A
  - A class `PosePipeline` (see pose_pipeline.py) that provides a gstreamer pipeline that reads live camera images from a V4L2 camera, performs human pose estimation on the camera images (using two Google Coral USB accelerators in parallel) and runs a custom callback function that can work with the estimated pose data.\
  The example in example_pose_pipeline.py tracks the lateral coordinate of the nose and prints every time it changes between left and right half of the camera image.
 
-The project is described in more detail here: [highratepose hackaday project](http://www.hackaday.io)
+The project is described in more detail here: [highratepose hackaday project](https://hackaday.io/project/193513-highratepose)
 
 # Setup
 
@@ -94,5 +94,6 @@ To run the example, you have to provide a local ...edgetpu.tflite model file as 
 ```
 python example_pose_pipeline.py /home/pi/models/movenet_single_pose_lightning_ptq_edgetpu.tflite
 ```
+Note that in the example callback there is a 5ms `sleep` command to simulate some processing time. You can leave that away in your own callback code.
 
 If you use the `PosePipeline` class from your own code, you can provide a custom `callback` function, that will be called for every new frame and receives the current frame data and the detected human pose keypoints as arguments. Note that you should not reference the frame and the pose data longer than during the callback. If you need to do so, you should make a copy, because they are only memory views.

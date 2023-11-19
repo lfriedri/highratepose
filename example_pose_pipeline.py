@@ -37,6 +37,7 @@ class NoseTracker:
             self._left = False
             print('Nose position changed to right half of image')
         
+        # simulate some processing time:
         sleep(0.005)
         
         if self._counter >= self._nMeasure:
